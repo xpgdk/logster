@@ -45,12 +45,39 @@ defmodule Logster.Plugs.Logger do
         |> Keyword.put(:status, conn.status)
         |> Keyword.put(:duration, formatted_duration(duration))
         |> Keyword.put(:state, conn.state)
+        |> Keyword.merge(response_body(conn))
         |> Keyword.merge(headers(conn.req_headers, Application.get_env(:logster, :allowed_headers, @default_allowed_headers)))
         |> Keyword.merge(Logger.metadata())
         |> formatter.format
       end
       conn
     end)
+  end
+
+  defp response_body(conn) do
+    case Application.get_env(:logster, :log_response, false) do
+      true ->
+        get_response_body(conn)
+      false ->
+        []
+    end
+  end
+
+  defp get_response_body(conn) do
+    content_type = List.keyfind(conn.resp_headers, "content-type", 0)
+    case content_type do
+      {"content-type", "application/json" <> _} ->
+        get_json_response_body(conn.resp_body)
+      _ ->
+        [{:resp_body, conn.resp_body}]
+    end
+  end
+
+  defp get_json_response_body(body) do
+    resp = Poison.decode!(body)
+    |> do_filter_params(Application.get_env(:logster, :filter_parameters, @default_filter_parameters))
+    |> do_format_values
+    [{:resp_body, resp}]
   end
 
   defp headers(_, []), do: []
