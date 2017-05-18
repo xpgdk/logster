@@ -55,16 +55,23 @@ defmodule Logster.Plugs.Logger do
   end
 
   defp response_body(conn) do
+    content_type_header = List.keyfind(conn.resp_headers, "content-type", 0)
     case Application.get_env(:logster, :log_response, false) do
       true ->
-        get_response_body(conn)
+        get_response_body(conn, content_type_header)
       false ->
         []
+      desired_content_type ->
+        {_, content_type} = content_type_header
+        if String.starts_with?(content_type, desired_content_type) do
+          get_response_body(conn, content_type_header)
+        else
+          []
+        end
     end
   end
 
-  defp get_response_body(conn) do
-    content_type = List.keyfind(conn.resp_headers, "content-type", 0)
+  defp get_response_body(conn, content_type) do
     case content_type do
       {"content-type", "application/json" <> _} ->
         get_json_response_body(conn.resp_body)
