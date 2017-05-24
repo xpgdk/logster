@@ -62,12 +62,15 @@ defmodule Logster.Plugs.Logger do
       false ->
         []
       desired_content_type ->
-        {_, content_type} = content_type_header
-        if String.starts_with?(content_type, desired_content_type) do
-          get_response_body(conn, content_type_header)
-        else
-          []
-        end
+        case content_type_header do
+          {_, content_type} ->
+            if String.starts_with?(content_type, desired_content_type) do
+              get_response_body(conn, content_type_header)
+            else
+              []
+            end
+          _x -> []
+      end
     end
   end
 
