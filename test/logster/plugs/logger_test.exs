@@ -191,6 +191,41 @@ defmodule Logster.Plugs.LoggerTest do
     assert message =~ "custom_metadata=OK"
   end
 
+  test ":log_response = true, no content-type" do
+    Application.put_env(:logster, :log_response, true)
+
+    on_exit(fn ->
+      Application.delete_env(:logster, :log_response)
+    end)
+  
+    {_conn, message} = capture_log fn -> conn(:post, "/hello/world", []) |> MyJSONPlug.call([]) end
+    json = message
+      |> String.split
+      |> Enum.at(3)
+      |> Poison.decode!()
+
+    assert json["resp_body"] == "Passthrough"
+  end
+
+  test ":log_response = true, :log_response_limit = 10 (bytes)" do
+    Application.put_env(:logster, :log_response, true)
+    Application.put_env(:logster, :log_response_limit, 10)
+
+    on_exit(fn ->
+      Application.delete_env(:logster, :log_response)
+      Application.delete_env(:logster, :log_response_limit)
+    end)
+
+    {_conn, message} = capture_log fn -> conn(:post, "/hello/world", []) |> MyJSONPlug.call([]) end
+
+    json = message
+      |> String.split
+      |> Enum.at(3)
+      |> Poison.decode!()
+
+    assert json["resp_body"] == "[Truncated]"
+  end
+
   test "[TextFormatter] log headers: no default headers, no output" do
     Application.put_env(:logster, :allowed_headers, [])
     {_conn, message} = conn(:post, "/hello/world", []) |> put_req_header("x-test-header", "test value") |> call

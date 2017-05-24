@@ -75,11 +75,17 @@ defmodule Logster.Plugs.Logger do
   end
 
   defp get_response_body(conn, content_type) do
-    case content_type do
-      {"content-type", "application/json" <> _} ->
-        get_json_response_body(conn.resp_body)
-      _ ->
-        [{:resp_body, conn.resp_body}]
+    maximum_size = Application.get_env(:logster, :log_response_limit, 2048)
+
+    if IO.iodata_length(conn.resp_body) > maximum_size do
+      [{:resp_body, "[Truncated]"}]
+    else
+      case content_type do
+        {"content-type", "application/json" <> _} ->
+          get_json_response_body(conn.resp_body)
+        _ ->
+          [{:resp_body, conn.resp_body}]
+      end
     end
   end
 
