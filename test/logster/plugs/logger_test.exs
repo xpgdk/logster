@@ -70,6 +70,25 @@ defmodule Logster.Plugs.LoggerTest do
     end
   end
 
+  defmodule MyEmptyJSONPlug do
+    use Plug.Builder
+
+    plug Logster.Plugs.Logger,
+      formatter: Logster.JSONFormatter
+
+    plug Plug.Parsers,
+      parsers: [:urlencoded, :multipart, :json],
+      pass: ["*/*"],
+      json_decoder: Poison
+    plug :passthrough
+
+    defp passthrough(conn, _) do
+      conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(200, "[]")
+    end
+  end
+
   defmodule MyCustomLogMetadata do
     use Plug.Builder
     plug Logster.Plugs.Logger
@@ -197,7 +216,7 @@ defmodule Logster.Plugs.LoggerTest do
     on_exit(fn ->
       Application.delete_env(:logster, :log_response)
     end)
-  
+
     {_conn, message} = capture_log fn -> conn(:post, "/hello/world", []) |> MyJSONPlug.call([]) end
     json = message
       |> String.split
@@ -205,6 +224,22 @@ defmodule Logster.Plugs.LoggerTest do
       |> Poison.decode!()
 
     assert json["resp_body"] == "Passthrough"
+  end
+
+  test ":log_response = \"application/json\"" do
+    Application.put_env(:logster, :log_response, "application/json")
+
+    on_exit(fn ->
+      Application.delete_env(:logster, :log_response)
+    end)
+
+    {_conn, message} = capture_log fn -> conn(:post, "/hello/world", []) |> MyEmptyJSONPlug.call([]) end
+    json = message
+      |> String.split
+      |> Enum.at(3)
+      |> Poison.decode!()
+
+    assert json["resp_body"] == []
   end
 
   test ":log_response = true, :log_response_limit = 10 (bytes)" do
@@ -217,7 +252,6 @@ defmodule Logster.Plugs.LoggerTest do
     end)
 
     {_conn, message} = capture_log fn -> conn(:post, "/hello/world", []) |> MyJSONPlug.call([]) end
-
     json = message
       |> String.split
       |> Enum.at(3)
