@@ -83,9 +83,10 @@ defmodule Logster.Plugs.LoggerTest do
     plug :passthrough
 
     defp passthrough(conn, _) do
+      response = conn.params["x"] || "[]"
       conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.send_resp(200, "[]")
+        |> Plug.Conn.send_resp(200, response)
     end
   end
 
@@ -226,7 +227,7 @@ defmodule Logster.Plugs.LoggerTest do
     assert json["resp_body"] == "Passthrough"
   end
 
-  test ":log_response = \"application/json\"" do
+  test ":log_response = \"application/json\", empty list response" do
     Application.put_env(:logster, :log_response, "application/json")
 
     on_exit(fn ->
@@ -240,6 +241,22 @@ defmodule Logster.Plugs.LoggerTest do
       |> Poison.decode!()
 
     assert json["resp_body"] == []
+  end
+
+  test ":log_response = \"application/json\", integer list response" do
+    Application.put_env(:logster, :log_response, "application/json")
+
+    on_exit(fn ->
+      Application.delete_env(:logster, :log_response)
+    end)
+
+    {_conn, message} = capture_log fn -> conn(:post, "/hello/world", [x: "[1,2,3,4]"]) |> MyEmptyJSONPlug.call([]) end
+    json = message
+      |> String.split
+      |> Enum.at(3)
+      |> Poison.decode!()
+
+    assert json["resp_body"] == [1,2,3,4]
   end
 
   test ":log_response = true, :log_response_limit = 10 (bytes)" do

@@ -140,6 +140,7 @@ defmodule Logster.Plugs.Logger do
 
   def do_format_values(%{} = params), do: params |> Enum.map(&do_format_value/1) |> Enum.into(%{})
   def do_format_values([]), do: []
+  def do_format_values(list) when is_list(list), do: Enum.map(list,&do_format_value/1) |> Enum.into([])
   def do_format_value({key, value}) when is_binary(value) do
     if String.valid?(value) do
       {key, value}
