@@ -94,6 +94,9 @@ defmodule Logster.Plugs.Logger do
     |> do_filter_params(Application.get_env(:logster, :filter_parameters, @default_filter_parameters))
     |> do_format_values
     [{:resp_body, resp}]
+  rescue
+    _ ->
+      [{:resp_body, "[Could not parse]"}]
   end
 
   defp headers(_, []), do: []
