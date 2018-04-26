@@ -277,6 +277,29 @@ defmodule Logster.Plugs.LoggerTest do
     assert json["resp_body"] == "[Truncated]"
   end
 
+  test ":parameter_limit = 10 (bytes)" do
+    Application.put_env(:logster, :parameter_limit, 10)
+
+    on_exit(fn ->
+      Application.delete_env(:logster, :parameter_limit)
+    end)
+
+    {_conn, message} = capture_log fn
+                       ->
+                         conn(:post,
+                              "/hello/world",
+                              [
+                                x: [1.32,2,3,4,5]
+                              ])
+                         |> MyJSONPlug.call([]) end
+    json = message
+      |> String.split
+      |> Enum.at(3)
+      |> Poison.decode!()
+
+    assert json["params"] == %{"truncated" => true}
+  end
+
   test "[TextFormatter] log headers: no default headers, no output" do
     Application.put_env(:logster, :allowed_headers, [])
     {_conn, message} = conn(:post, "/hello/world", []) |> put_req_header("x-test-header", "test value") |> call

@@ -124,8 +124,66 @@ defmodule Logster.Plugs.Logger do
 
   defp get_params(%{params: params}) do
     params
+    |> do_limit_params(Application.get_env(:logster, :parameter_limit, :infinity))
     |> do_filter_params(Application.get_env(:logster, :filter_parameters, @default_filter_parameters))
     |> do_format_values
+  end
+
+  defp do_limit_params(val, :infinity), do: val
+  defp do_limit_params(val, allowed_size) do
+    case do_calc_param_size(val, allowed_size) do
+      size when is_integer(size) -> val
+      :exceeds -> %{"truncated" => true}
+    end
+  end
+
+  @typep size :: integer | :exceeds
+
+  @spec do_calc_param_size(any, non_neg_integer) :: size
+  defp do_calc_param_size(%{} = map, maximum_size) do
+    Enum.reduce_while(map, 2, fn
+      {k, v}, current_size ->
+        new_size = add_sizes(do_calc_param_size(k, maximum_size - current_size),
+                             do_calc_param_size(v, maximum_size - current_size))
+        case new_size do
+          :exceeds -> {:halt, :exceeds}
+          size ->
+            size = size + current_size + 1
+            if size > maximum_size do {:halt, :exceeds} else {:cont, size} end
+        end
+    end)
+  end
+  defp do_calc_param_size(b, maximum_size) when is_binary(b) do
+    Kernel.byte_size(b)
+    |> maybe_exceeds(maximum_size)
+  end
+  defp do_calc_param_size(b, _maximum_size) when is_boolean(b), do: 5
+  defp do_calc_param_size(number, _maximum_size) when is_number(number), do: to_string(number) |> Kernel.byte_size
+  defp do_calc_param_size(list, maximum_size) when is_list(list) do
+    Enum.reduce_while(list, 2, fn
+      e, current_size ->
+        new_size = do_calc_param_size(e, maximum_size - current_size)
+        case new_size do
+          :exceeds -> {:halt, :exceeds}
+          size ->
+            size = size + current_size + 1
+            if size > maximum_size do {:halt, :exceeds} else {:cont, size} end
+        end
+    end)
+  end
+  defp do_calc_param_size(_, _maximum_size), do: 1
+
+  @spec add_sizes(size, size) :: size
+  defp add_sizes(:exceeds, _), do: :exceeds
+  defp add_sizes(_, :exceeds), do: :exceeds
+  defp add_sizes(a, b), do: a + b
+
+  defp maybe_exceeds(size, maximum_size) do
+    if size > maximum_size do
+      :exceeds
+    else
+      size
+    end
   end
 
   def do_filter_params(%{__struct__: mod} = struct, _params_to_filter) when is_atom(mod), do: struct
