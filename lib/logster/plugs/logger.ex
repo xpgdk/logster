@@ -140,6 +140,7 @@ defmodule Logster.Plugs.Logger do
   @typep size :: integer | :exceeds
 
   @spec do_calc_param_size(any, non_neg_integer) :: size
+  defp do_calc_param_size(%{__struct__: _}, _maximum_size), do: 1
   defp do_calc_param_size(%{} = map, maximum_size) do
     Enum.reduce_while(map, 2, fn
       {k, v}, current_size ->
