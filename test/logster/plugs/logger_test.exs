@@ -9,10 +9,12 @@ defmodule Logster.Plugs.LoggerTest do
     use Plug.Builder
 
     plug Logster.Plugs.Logger
+
     plug Plug.Parsers,
       parsers: [:urlencoded, :multipart, :json],
       pass: ["*/*"],
-      json_decoder: Poison
+      json_decoder: Jason
+
     plug :passthrough
 
     defp passthrough(conn, _) do
@@ -20,25 +22,66 @@ defmodule Logster.Plugs.LoggerTest do
     end
   end
 
+  defmodule MyUnfetchedParamsPlug do
+    use Plug.Builder
+
+    plug Logster.Plugs.Logger
+    plug :passthrough
+
+    defp passthrough(conn, _) do
+      Plug.Conn.send_resp(conn, 200, "Passthrough")
+    end
+  end
+
+  defmodule MyStruct do
+    defstruct name: "John", age: 27
+  end
+
+  defmodule MyStructParamsPlug do
+    use Plug.Builder
+
+    plug Logster.Plugs.Logger
+    plug :passthrough
+
+    defp passthrough(conn, _) do
+      conn = %{conn | params: %MyStruct{}}
+      Plug.Conn.send_resp(conn, 200, "Passthrough")
+    end
+  end
+
+  defmodule MyMapNotJsonablePlug do
+    use Plug.Builder
+
+    plug Logster.Plugs.Logger
+    plug :passthrough
+
+    defp passthrough(conn, _) do
+      conn = %{conn | params: %{my_tuple: {27}}}
+      Plug.Conn.send_resp(conn, 200, "Passthrough")
+    end
+  end
+
   defp call(conn) do
-    capture_log fn -> MyPlug.call(conn, []) end
+    capture_log(fn -> MyPlug.call(conn, []) end)
   end
 
   defp put_phoenix_privates(conn) do
     conn
-      |> put_private(:phoenix_controller, Logster.Plugs.LoggerTest)
-      |> put_private(:phoenix_action, :show)
-      |> put_private(:phoenix_format, "json")
+    |> put_private(:phoenix_controller, Logster.Plugs.LoggerTest)
+    |> put_private(:phoenix_action, :show)
+    |> put_private(:phoenix_format, "json")
   end
 
   defmodule MyChunkedPlug do
     use Plug.Builder
 
     plug Logster.Plugs.Logger
+
     plug Plug.Parsers,
       parsers: [:urlencoded, :multipart, :json],
       pass: ["*/*"],
-      json_decoder: Poison
+      json_decoder: Jason
+
     plug :passthrough
 
     defp passthrough(conn, _) do
@@ -50,6 +93,7 @@ defmodule Logster.Plugs.LoggerTest do
     use Plug.Builder, log_on_halt: :debug
 
     plug :halter
+
     defp halter(conn, _), do: halt(conn)
   end
 
@@ -62,7 +106,8 @@ defmodule Logster.Plugs.LoggerTest do
     plug Plug.Parsers,
       parsers: [:urlencoded, :multipart, :json],
       pass: ["*/*"],
-      json_decoder: Poison
+      json_decoder: Jason
+
     plug :passthrough
 
     defp passthrough(conn, _) do
@@ -79,7 +124,7 @@ defmodule Logster.Plugs.LoggerTest do
     plug Plug.Parsers,
       parsers: [:urlencoded, :multipart, :json],
       pass: ["*/*"],
-      json_decoder: Poison
+      json_decoder: Jason
     plug :passthrough
 
     defp passthrough(conn, _) do
@@ -90,26 +135,43 @@ defmodule Logster.Plugs.LoggerTest do
     end
   end
 
-  defmodule MyCustomLogMetadata do
+  defmodule MyRenameFieldsPlug do
     use Plug.Builder
-    plug Logster.Plugs.Logger
+
+    plug Logster.Plugs.Logger,
+      renames: %{duration: :responsetime, status: :mystatus}
+
     plug Plug.Parsers,
       parsers: [:urlencoded, :multipart, :json],
       pass: ["*/*"],
-      json_decoder: Poison
+      json_decoder: Jason
+
     plug :passthrough
 
     defp passthrough(conn, _) do
-      Logger.metadata(%{custom_metadata: "OK"})
+      Plug.Conn.send_resp(conn, 200, "Passthrough")
+    end
+  end
+
+  defmodule MyExcludeFieldsPlug do
+    use Plug.Builder
+
+    plug Logster.Plugs.Logger,
+      excludes: [:params]
+
+    plug :passthrough
+
+    defp passthrough(conn, _) do
       Plug.Conn.send_resp(conn, 200, "Passthrough")
     end
   end
 
   defp capture_log(fun) do
-    data = capture_io(:user, fn ->
-      Process.put(:capture_log, fun.())
-      Logger.flush()
-    end)
+    data =
+      capture_io(:user, fn ->
+        Process.put(:capture_log, fun.())
+        Logger.flush()
+      end)
 
     {Process.get(:capture_log), data}
   end
@@ -124,7 +186,7 @@ defmodule Logster.Plugs.LoggerTest do
     assert message =~ ~r/duration=\d+.\d{3}/u
     assert message =~ "state=set"
 
-    {_conn, message} = conn(:post, "/hello/world", [foo: :bar]) |> call
+    {_conn, message} = conn(:post, "/hello/world", foo: :bar) |> call
 
     assert message =~ "method=POST"
     assert message =~ "path=/hello/world"
@@ -135,19 +197,26 @@ defmodule Logster.Plugs.LoggerTest do
   end
 
   test "handles params with spaces" do
-    {_conn, message} = conn(:post, "/hello/world", [foo: "one two three"]) |> call
+    {_conn, message} = conn(:post, "/hello/world", foo: "one two three") |> call
+
     assert message =~ ~s(params={"foo":"one two three"})
   end
 
   test "supports non-printable ascii params" do
-    {_conn, message} = conn(:get, "/?v=ok%85ok") |> call
-    assert message =~ "ok%85ok"
+    {_conn, message} = conn(:get, "/?v=ok…ok") |> call
+
+    assert message =~ "ok…ok"
   end
 
   test "logs file upload params" do
-    {_conn, message} = conn(:post, "/hello/world", [upload: %Plug.Upload{content_type: "image/png", filename: "blah.png"}]) |> call
+    {_conn, message} =
+      conn(:post, "/hello/world",
+        upload: %Plug.Upload{content_type: "image/png", filename: "blah.png"}
+      )
+      |> call
 
-    assert message =~ ~s(params={"upload":{"path":null,"filename":"blah.png","content_type":"image/png"})
+    assert message =~
+             ~s(params={"upload":{"content_type":"image/png","filename":"blah.png","path":null})
   end
 
   test "logs phoenix related attributes if present" do
@@ -162,7 +231,8 @@ defmodule Logster.Plugs.LoggerTest do
   end
 
   test "filters parameters from the log" do
-    {_conn, message} = conn(:post, "/hello/world", [password: :bar, foo: [password: :other]]) |> call
+    {_conn, message} =
+      conn(:post, "/hello/world", password: :bar, foo: [password: :other]) |> call
 
     assert message =~ ~s("password":"[FILTERED]")
     assert message =~ ~s("foo":{"password":"[FILTERED]"})
@@ -177,38 +247,86 @@ defmodule Logster.Plugs.LoggerTest do
   end
 
   test "logs chunked if chunked reply" do
-    {_, message} = capture_log(fn ->
-       conn(:get, "/hello/world") |> MyChunkedPlug.call([])
-    end)
+    {_, message} =
+      capture_log(fn ->
+        conn(:get, "/hello/world") |> MyChunkedPlug.call([])
+      end)
 
-    assert message =~ "state=chunked"
+    assert message =~ "state=set_chunked"
   end
 
   test "logs halted connections if :log_on_halt is true" do
-    {_conn, message} = capture_log fn ->
-      conn(:get, "/foo") |> MyHaltingPlug.call([])
-    end
+    {_conn, message} =
+      capture_log(fn ->
+        conn(:get, "/foo") |> MyHaltingPlug.call([])
+      end)
 
     assert message =~ "Logster.Plugs.LoggerTest.MyHaltingPlug halted in :halter/2"
   end
 
+  test "logs params even when they are structs" do
+    {_, message} =
+      capture_log(fn ->
+        conn(:get, "/hello/world") |> MyStructParamsPlug.call([])
+      end)
+
+    assert message =~ "params={\"age\":27,\"name\":\"John\"}"
+  end
+
+  test "logs params with inspect when a map is not encodeable as json" do
+    {_, message} =
+      capture_log(fn ->
+        conn(:get, "/hello/world") |> MyMapNotJsonablePlug.call([])
+      end)
+
+    assert message =~ "%{my_tuple: {27}}"
+  end
+
+  test "does not log params if the params are not fetched" do
+    {_, message} =
+      capture_log(fn ->
+        conn(:get, "/hello/world") |> MyUnfetchedParamsPlug.call([])
+      end)
+
+    assert message =~ "params={}"
+  end
+
   test "logs to json with the JSONFormatter" do
-    {_conn, message} = capture_log fn ->
-      conn(:get, "/good") |> MyJSONPlug.call([])
-    end
-    json = message
-    |> String.split
-    |> Enum.at(3)
-    assert %{"path" =>  "/good"} = decoded = Poison.decode!(json)
+    {_conn, message} =
+      capture_log(fn ->
+        conn(:get, "/good") |> MyJSONPlug.call([])
+      end)
+
+    json =
+      message
+      |> String.split()
+      |> Enum.at(3)
+
+    decoded = Jason.decode!(json)
+
+    assert %{"path" => "/good"} = decoded
+
     %{"duration" => duration} = decoded
     assert is_float(duration)
   end
 
-  test "dump metadata into logs" do
-    {_conn, message} = capture_log fn ->
-      conn(:get, "/good") |> MyCustomLogMetadata.call([])
-    end
-    assert message =~ "custom_metadata=OK"
+  test "renaming fields" do
+    {_conn, message} =
+      capture_log(fn ->
+        conn(:get, "/foo") |> MyRenameFieldsPlug.call([])
+      end)
+
+    assert message =~ "mystatus=200"
+    assert message =~ ~r/responsetime=\d+.\d{3}/u
+  end
+
+  test "excluding fields" do
+    {_conn, message} =
+      capture_log(fn ->
+        conn(:get, "/foo") |> MyExcludeFieldsPlug.call([])
+      end)
+
+    refute message =~ "params={}"
   end
 
   test ":log_response = true, no content-type" do
@@ -222,7 +340,7 @@ defmodule Logster.Plugs.LoggerTest do
     json = message
       |> String.split
       |> Enum.at(3)
-      |> Poison.decode!()
+      |> Jason.decode!()
 
     assert json["resp_body"] == "Passthrough"
   end
@@ -238,7 +356,7 @@ defmodule Logster.Plugs.LoggerTest do
     json = message
       |> String.split
       |> Enum.at(3)
-      |> Poison.decode!()
+      |> Jason.decode!()
 
     assert json["resp_body"] == []
   end
@@ -254,7 +372,7 @@ defmodule Logster.Plugs.LoggerTest do
     json = message
       |> String.split
       |> Enum.at(3)
-      |> Poison.decode!()
+      |> Jason.decode!()
 
     assert json["resp_body"] == [1,2,3,4]
   end
@@ -272,7 +390,7 @@ defmodule Logster.Plugs.LoggerTest do
     json = message
       |> String.split
       |> Enum.at(3)
-      |> Poison.decode!()
+      |> Jason.decode!()
 
     assert json["resp_body"] == "[Truncated]"
   end
@@ -295,50 +413,72 @@ defmodule Logster.Plugs.LoggerTest do
     json = message
       |> String.split
       |> Enum.at(3)
-      |> Poison.decode!()
+      |> Jason.decode!()
 
     assert json["params"] == %{"truncated" => true}
   end
 
   test "[TextFormatter] log headers: no default headers, no output" do
     Application.put_env(:logster, :allowed_headers, [])
-    {_conn, message} = conn(:post, "/hello/world", []) |> put_req_header("x-test-header", "test value") |> call
+
+    {_conn, message} =
+      conn(:post, "/hello/world", [])
+      |> put_req_header("x-test-header", "test value")
+      |> call
 
     refute message =~ ~s(headers)
   end
 
   test "[JSONFormatter] log headers: no default headers, no output" do
     Application.put_env(:logster, :allowed_headers, [])
-    {_conn, message} = capture_log fn ->
-      conn(:post, "/hello/world", []) |> put_req_header("x-test-header", "test value") |> MyJSONPlug.call([])
-    end
-    json = message
-    |> String.split
-    |> Enum.at(3)
-    refute Poison.decode!(json)[:headers]
+
+    {_conn, message} =
+      capture_log(fn ->
+        conn(:post, "/hello/world", [])
+        |> put_req_header("x-test-header", "test value")
+        |> MyJSONPlug.call([])
+      end)
+
+    json =
+      message
+      |> String.split()
+      |> Enum.at(3)
+
+    refute Jason.decode!(json)[:headers]
   end
 
   test "[TextFormatter] log headers: test values" do
     Application.put_env(:logster, :allowed_headers, ["my-header-one", "my-header-two"])
-    {_conn, message} = conn(:post, "/hello/world", []) |> put_req_header("my-header-one", "test-value-1") |> call
+
+    {_conn, message} =
+      conn(:post, "/hello/world", [])
+      |> put_req_header("my-header-one", "test-value-1")
+      |> call
 
     assert message =~ ~s("test-value-1")
   end
 
   test "[JSONFormatter] log headers: test values" do
     Application.put_env(:logster, :allowed_headers, ["my-header-one", "my-header-two"])
-    {_conn, message} = capture_log fn ->
-      conn(:post, "/hello/world", [])
-      |> put_req_header("my-header-one", "test-value-1")
-      |> put_req_header("my-header-three", "test-value-3")
-      |> MyJSONPlug.call([])
-    end
-    json = message
-    |> String.split
-    |> Enum.at(3)
-    assert Poison.decode!(json)["headers"]["my-header-one"] == "test-value-1"
-    refute Poison.decode!(json)["headers"]["my-header-two"]
-    refute Poison.decode!(json)["headers"]["my-header-three"]
-  end
 
+    {_conn, message} =
+      capture_log(fn ->
+        conn(:post, "/hello/world", [])
+        |> put_req_header("my-header-one", "test-value-1")
+        |> put_req_header("my-header-three", "test-value-3")
+        |> MyJSONPlug.call([])
+      end)
+
+    json =
+      message
+      |> String.split()
+      |> Enum.at(3)
+
+    headers = Jason.decode!(json)["headers"]
+
+    assert headers["my-header-one"] == "test-value-1"
+
+    refute headers["my-header-two"]
+    refute headers["my-header-three"]
+  end
 end

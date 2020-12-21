@@ -3,7 +3,6 @@
 [![Build Status](https://travis-ci.org/navinpeiris/logster.svg?branch=master)](https://travis-ci.org/navinpeiris/logster)
 [![Hex version](https://img.shields.io/hexpm/v/logster.svg "Hex version")](https://hex.pm/packages/logster)
 [![Hex downloads](https://img.shields.io/hexpm/dt/logster.svg "Hex downloads")](https://hex.pm/packages/logster)
-[![Deps Status](https://beta.hexfaktor.org/badge/all/github/navinpeiris/logster.svg)](https://beta.hexfaktor.org/github/navinpeiris/logster)
 [![License](http://img.shields.io/:license-mit-blue.svg)](http://doge.mit-license.org)
 
 An easy to parse, one line logger for Elixir Plug.Conn and Phoenix, inspired by [lograge](https://github.com/roidrage/lograge).
@@ -27,15 +26,7 @@ First, add Logster to your `mix.exs` dependencies:
 
 ```elixir
 def deps do
-  [{:logster, "~> 0.4"}]
-end
-```
-
-and add it to your list of applications:
-
-```elixir
-def application() do
-  [applications: [:logster]]
+  [{:logster, "~> 1.0"}]
 end
 ```
 
@@ -110,19 +101,92 @@ That means your log messages will be formatted thusly:
 ```
 *Caution:* There is no guarantee that what reaches your console will be valid JSON. The Elixir `Logger` module has its own formatting which may be appended to your message. See the [Logger documentation](http://elixir-lang.org/docs/stable/logger/Logger.html) for more information.
 
-### Adding custom metadata
+### Metadata
 
-Custom metadata can be added using `Logger.metadata` such as:
+Custom metadata can be added to logs using `Logger.metadata` and configuring your logger backend:
 
 ```elixir
+# add metadata for all future logs from this process
 Logger.metadata(%{user_id: "123", foo: "bar"})
+
+# example for configuring console backend to include metadata in logs.
+# see https://hexdocs.pm/logger/Logger.html#module-console-backend documentation for more
+# config.exs
+config :logger, :console, metadata: [:user_id, :foo]
+```
+
+The easiest way to do this app wide is to introduce a new plug which you can include in your phoenix router pipeline.
+
+For example:
+
+```elixir
+defmodule HelloPhoenix.SetLoggerMetadata do
+  def init(opts), do: opts
+
+  def call(conn, _opts) do
+    Logger.metadata user_id: get_user_id(conn),
+                    remote_ip: format_ip(conn)
+    conn
+  end
+
+  defp format_ip(%{remote_ip: remote_ip}) when remote_ip != nil, do: :inet_parse.ntoa(remote_ip)
+  defp format_ip(_), do: nil
+
+  defp get_user_id(%{assigns: %{current_user: %{id: id}}}), do: id
+  defp get_user_id(_), do: nil
+end
+```
+
+And then add this plug to the relevant pipelines in the router:
+
+```elixir
+pipeline :browser do
+  plug :fetch_session
+  plug :fetch_flash
+  plug :put_secure_browser_headers
+  # ...
+  plug HelloPhoenix.SetLoggerMetadata
+  # ...
+end
+```
+
+### Renaming default fields
+
+You can rename the default keys passing a map like `%{key: :new_key}`:
+
+```elixir
+plug Logster.Plugs.Logger, renames: %{duration: :response_time, params: :parameters}
+```
+It will log the following:
+```
+[info] method=GET path=/articles/some-article format=html controller=HelloPhoenix.ArticleController action=show parameters={"id":"some-article"} status=200 response_time=0.402 state=set
+```
+
+### Excluding fields
+
+You can exclude fields with `:excludes`:
+
+```elixir
+plug Logster.Plugs.Logger, excludes: [:params, :status, :state]
+```
+It will log the following:
+```
+[info] method=GET path=/articles/some-article format=html controller=HelloPhoenix.ArticleController action=show duration=0.402
 ```
 
 #### Writing your own formatter
 
 To write your own formatter, all that is required is a module which defines a `format/1` function, which accepts a keyword list and returns a string.
 
-### License
+## Development
+
+Use the following mix task before pushing commits to run the same checks that are run in CI:
+
+```
+mix ci
+```
+
+## License
 
 The MIT License
 
