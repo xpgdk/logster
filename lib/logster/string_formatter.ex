@@ -5,6 +5,8 @@ defmodule Logster.StringFormatter do
     |> Enum.intersperse(?\s)
   end
 
+  def format_on_call(params), do: format(params)
+
   defp format_field({key, value}) do
     [to_string(key), "=", format_value(value)]
   end

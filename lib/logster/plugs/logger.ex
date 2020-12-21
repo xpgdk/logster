@@ -35,27 +35,48 @@ defmodule Logster.Plugs.Logger do
 
   def call(conn, opts) do
     start_time = current_time()
+    formatter = Keyword.get(opts, :formatter, Logster.StringFormatter)
+
+    if Application.get_env(:logster, :log_on_call, false) do
+      Logger.log(log_level(conn, opts), fn ->
+        construct_entry(conn, opts)
+        |> formatter.format_on_call
+      end)
+    end
 
     Conn.register_before_send(conn, fn conn ->
-      Logger.log log_level(conn, opts), fn ->
-        formatter = Keyword.get(opts, :formatter, Logster.StringFormatter)
+      Logger.log(log_level(conn, opts), fn ->
         stop_time = current_time()
         duration = time_diff(start_time, stop_time)
-        []
-        |> Keyword.put(:method, conn.method)
-        |> Keyword.put(:path, conn.request_path)
-        |> Keyword.merge(formatted_phoenix_info(conn))
-        |> Keyword.put(:params, get_params(conn))
-        |> Keyword.put(:status, conn.status)
-        |> Keyword.put(:duration, formatted_duration(duration))
-        |> Keyword.put(:state, conn.state)
+        renames = Keyword.get(opts, :renames, %{})
+
+        construct_entry(conn, opts)
         |> Keyword.merge(response_body(conn))
-        |> Keyword.merge(headers(conn.req_headers, Application.get_env(:logster, :allowed_headers, @default_allowed_headers)))
-        |> Keyword.merge(Logger.metadata())
+        |> put_field(:duration, renames, formatted_duration(duration))
         |> formatter.format
-      end
+      end)
+
       conn
     end)
+  end
+
+  defp construct_entry(conn, opts) do
+    renames = Keyword.get(opts, :renames, %{})
+
+    []
+    |> put_field(:method, renames, conn.method)
+    |> put_field(:path, renames, conn.request_path)
+    |> Keyword.merge(formatted_phoenix_info(conn))
+    |> put_field(:params, renames, get_params(conn))
+    |> put_field(:status, renames, conn.status)
+    |> put_field(:state, renames, conn.state)
+    |> Keyword.merge(
+      headers(
+        conn.req_headers,
+        Application.get_env(:logster, :allowed_headers, @default_allowed_headers)
+      )
+    )
+    |> exclude(Keyword.get(opts, :excludes, []))
   end
 
   defp response_body(conn) do

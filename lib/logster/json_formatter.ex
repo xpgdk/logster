@@ -4,4 +4,6 @@ defmodule Logster.JSONFormatter do
     |> Enum.into(%{})
     |> Jason.encode!()
   end
+
+  def format_on_call(params), do: format(params)
 end
