@@ -169,8 +169,9 @@ defmodule Logster.Plugs.Logger do
 
   defp get_params(%{params: _params = %Plug.Conn.Unfetched{}}), do: %{}
 
-  defp get_params(%{params: params}) do
+  defp get_params(%{params: params} = conn) do
     params
+    |> Map.merge(conn.body_params)
     |> do_limit_params(Application.get_env(:logster, :parameter_limit, :infinity))
     |> do_filter_params(Application.get_env(:logster, :filter_parameters, @default_filter_parameters))
     |> do_format_values
